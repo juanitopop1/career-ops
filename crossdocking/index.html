@@ -59,7 +59,7 @@ button.x{background:var(--bad);padding:2px 8px}
     <label>% que cae a repesca <input id="repPct" type="number" min="0" max="100" value="3"></label>
   </div>
   <div class="card">
-    <h2>Códigos / subcanales (demanda %)</h2>
+    <h2 id="codesTitle">Demanda % por código</h2>
     <table id="codes"></table>
     <button id="add" style="margin-top:6px">+ código</button>
   </div>
@@ -71,6 +71,7 @@ button.x{background:var(--bad);padding:2px 8px}
 
 <div id="plan"></div>
 <div id="sum"></div>
+<div id="moves" style="margin-bottom:8px"></div>
 <div id="msgs"></div>
 <div class="lay" id="layout"></div>
 
@@ -111,16 +112,18 @@ const num = id => Math.max(0, +$(id).value || 0);
 let codes = [22, 18, 14, 12, 10, 8, 7, 5, 4].map((s, i) => ({name: 'Código ' + (i + 1), share: s}));
 
 function drawCodes() {
+  $('codesTitle').textContent = 'Demanda % por código · ' + (view ? 'Hora ' + view + ' (vacío = base)' : 'plan inicial (base)');
   $('codes').innerHTML = codes.map((c, i) =>
     `<tr><td><input data-i="${i}" data-k="name" value="${c.name}"></td>
-     <td class="s"><input data-i="${i}" data-k="share" type="number" min="0" value="${c.share}"></td>
+     <td class="s"><input data-i="${i}" data-k="share" type="number" min="0" placeholder="${c.share}" value="${view === 0 ? c.share : sh[view]?.[i] ?? ''}"></td>
      <td><button class="x" data-del="${i}">×</button></td></tr>`).join('');
 }
 
-let view = 0, hv = []; // view 0 = plan inicial (total/horas); hv[h-1] = volumen real de la hora h
+let view = 0, hv = [], sh = {}; // view 0 = plan inicial; hv[h-1] = volumen de la hora h; sh[h][i] = % del código i en la hora h
 const H = () => Math.min(24, Math.max(1, Math.floor(num('hours'))));
 const vol = h => (h === 0 || hv[h - 1] === undefined) ? num('total') / H() : hv[h - 1];
-const alloc = h => allocate({staff: Math.floor(num('staff')), volume: vol(h), codes: codes.filter(c => c.name),
+const hcodes = h => codes.map((c, i) => ({name: c.name, share: h ? sh[h]?.[i] ?? c.share : c.share})).filter(c => c.name);
+const alloc = h => allocate({staff: Math.floor(num('staff')), volume: vol(h), codes: hcodes(h),
   capInd: num('capInd') || 1, capCanal: num('capCanal') || 1, capHH: num('capHH') || 1,
   capRep: num('capRep') || 1, repPct: num('repPct')});
 
@@ -166,7 +169,11 @@ function render() {
   $('sum').textContent = `Asignados: ${k}/${staff} · Cuello de botella: ${isFinite(worst) ? Math.round(worst * 100) + '%' : 'posiciones sin cubrir'}`;
   $('msgs').innerHTML = (gaps.length ? `<div class="msg">Faltan colaboradores. Sin cubrir: ${gaps.join(', ')}</div>` : '') +
     (worst > 1 && !gaps.length ? `<div class="msg">Sobrecarga: con este personal no se alcanza el volumen (uso &gt; 100%).</div>` : '');
-  const cols = [...valid].sort((a, b) => b.share - a.share).map(c => `
+  const prev = view ? alloc(view - 1) : [];
+  const moves = st.map(s => [s, s.n - (prev.find(p => p.id === s.id)?.n ?? 0)]).filter(([, d]) => d)
+    .map(([s, d]) => `${d > 0 ? '+' : ''}${d} ${s.type}${s.code ? ' ' + s.code : ''}`);
+  $('moves').innerHTML = view ? `<b>Movimientos vs ${view > 1 ? 'hora ' + (view - 1) : 'plan inicial'}:</b> ${moves.join(' · ') || 'sin cambios'}` : '';
+  const cols = [...hcodes(view)].sort((a, b) => b.share - a.share).map(c => `
     <div class="col"><div class="lbl">${c.name} · ${c.share}%</div>
       ${html['c:' + c.name]}<div class="arrow">▼ tolva</div>${html['h:' + c.name]}</div>`).join('');
   $('layout').innerHTML = `
@@ -179,7 +186,8 @@ function render() {
 
 document.addEventListener('input', e => {
   const t = e.target;
-  if (t.dataset.k) codes[t.dataset.i][t.dataset.k] = t.dataset.k === 'share' ? +t.value || 0 : t.value;
+  if (t.dataset.k === 'share' && view) (sh[view] ??= {})[t.dataset.i] = t.value === '' ? undefined : +t.value;
+  else if (t.dataset.k) codes[t.dataset.i][t.dataset.k] = t.dataset.k === 'share' ? +t.value || 0 : t.value;
   if (t.dataset.h) hv[+t.dataset.h] = t.value === '' ? undefined : +t.value;
   if (t.id === 'hours') { hv.length = H(); drawHours(); }
   if (t.id === 'total') drawHours();
@@ -187,8 +195,12 @@ document.addEventListener('input', e => {
 });
 document.addEventListener('click', e => {
   const tr = e.target.closest('tr[data-view]');
-  if (tr) { view = +tr.dataset.view; render(); }
-  if (e.target.dataset.del !== undefined) { codes.splice(+e.target.dataset.del, 1); drawCodes(); render(); }
+  if (tr) { view = +tr.dataset.view; drawCodes(); render(); }
+  if (e.target.dataset.del !== undefined) {
+    const d = +e.target.dataset.del; codes.splice(d, 1);
+    for (const h in sh) sh[h] = Object.fromEntries(Object.entries(sh[h]).filter(([i]) => +i !== d).map(([i, v]) => [+i > d ? i - 1 : i, v]));
+    drawCodes(); render();
+  }
   if (e.target.id === 'add') { codes.push({name: 'Código ' + (codes.length + 1), share: 5}); drawCodes(); render(); }
 });
 drawCodes(); drawHours(); render();
