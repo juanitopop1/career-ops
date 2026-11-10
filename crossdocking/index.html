@@ -15,7 +15,9 @@ h1{font-size:20px;margin:0 0 12px}h2{font-size:15px;margin:0 0 8px}
 label{display:flex;justify-content:space-between;align-items:center;gap:8px;margin:4px 0;color:var(--mut)}
 input,textarea{background:var(--bg);color:var(--tx);border:1px solid var(--bd);border-radius:4px;padding:4px 6px;font:inherit}
 label input{width:90px}textarea{width:100%;height:70px}
-table{width:100%;border-collapse:collapse}td{padding:2px}td input{width:100%}td.s input{width:64px}
+table{width:100%;border-collapse:collapse}
+#plan{margin-bottom:12px;overflow-x:auto}#plan table{width:auto;min-width:100%}#plan th,#plan td{padding:4px 10px;text-align:center}
+#plan tr.sel{background:var(--ac);color:#fff}#plan tbody tr{cursor:pointer}td{padding:2px}td input{width:100%}td.s input{width:64px}
 button{background:var(--ac);color:#fff;border:0;border-radius:4px;padding:4px 10px;cursor:pointer;font:inherit}
 button.x{background:var(--bad);padding:2px 8px}
 #sum{margin-bottom:12px;font-weight:600}
@@ -43,15 +45,16 @@ button.x{background:var(--bad);padding:2px 8px}
   <div class="card">
     <h2>Turno</h2>
     <label>Colaboradores disponibles <input id="staff" type="number" min="1" value="30"></label>
-    <label>Volumen (paquetes/hora) <input id="volume" type="number" min="1" value="3000"></label>
+    <label>Total a procesar en el turno (paq) <input id="total" type="number" min="1" value="24000"></label>
+    <label>Horas del turno <input id="hours" type="number" min="1" max="24" value="8"></label>
     <label>Nombres (opcional, uno por línea)<span></span></label>
     <textarea id="names" placeholder="Ana&#10;Luis&#10;..."></textarea>
   </div>
   <div class="card">
     <h2>Capacidad por persona (paq/h)</h2>
-    <label>Inducción <input id="capInd" type="number" min="1" value="1200"></label>
-    <label>Isla (canalización) <input id="capCanal" type="number" min="1" value="600"></label>
-    <label>Handheld / armado HU <input id="capHH" type="number" min="1" value="450"></label>
+    <label>Inductor <input id="capInd" type="number" min="1" value="1200"></label>
+    <label>Pescador <input id="capCanal" type="number" min="1" value="600"></label>
+    <label>Bipeador (handheld + armado HU) <input id="capHH" type="number" min="1" value="450"></label>
     <label>Repesca <input id="capRep" type="number" min="1" value="400"></label>
     <label>% que cae a repesca <input id="repPct" type="number" min="0" max="100" value="3"></label>
   </div>
@@ -60,8 +63,13 @@ button.x{background:var(--bad);padding:2px 8px}
     <table id="codes"></table>
     <button id="add" style="margin-top:6px">+ código</button>
   </div>
+  <div class="card">
+    <h2>Volumen por hora (vacío = promedio)</h2>
+    <table id="hourly"></table>
+  </div>
 </div>
 
+<div id="plan"></div>
 <div id="sum"></div>
 <div id="msgs"></div>
 <div class="lay" id="layout"></div>
@@ -71,12 +79,12 @@ button.x{background:var(--bad);padding:2px 8px}
 // Techo: ignora distancia/ergonomía y máximos por posición física; si hace falta, añadir tope por estación.
 function allocate({staff, volume, codes, capInd, capCanal, capHH, capRep, repPct}) {
   const tot = codes.reduce((a, c) => a + c.share, 0) || 1;
-  const st = [{id: 'ind', type: 'Inducción', load: volume, cap: capInd, n: 0},
+  const st = [{id: 'ind', type: 'Inductor', load: volume, cap: capInd, n: 0},
               {id: 'rep', type: 'Repesca', load: volume * repPct / 100, cap: capRep, n: 0}];
   [...codes].sort((a, b) => b.share - a.share).forEach(c => {
     const load = volume * c.share / tot;
-    st.push({id: 'c:' + c.name, type: 'Isla', code: c.name, load, cap: capCanal, n: 0},
-            {id: 'h:' + c.name, type: 'Handheld', code: c.name, load, cap: capHH, n: 0});
+    st.push({id: 'c:' + c.name, type: 'Pescador', code: c.name, load, cap: capCanal, n: 0},
+            {id: 'h:' + c.name, type: 'Bipeador', code: c.name, load, cap: capHH, n: 0});
   });
   let left = staff;
   for (const s of st) if (left > 0) { s.n = 1; left--; }          // cobertura mínima por prioridad
@@ -109,14 +117,41 @@ function drawCodes() {
      <td><button class="x" data-del="${i}">×</button></td></tr>`).join('');
 }
 
+let view = 0, hv = []; // view 0 = plan inicial (total/horas); hv[h-1] = volumen real de la hora h
+const H = () => Math.min(24, Math.max(1, Math.floor(num('hours'))));
+const vol = h => (h === 0 || hv[h - 1] === undefined) ? num('total') / H() : hv[h - 1];
+const alloc = h => allocate({staff: Math.floor(num('staff')), volume: vol(h), codes: codes.filter(c => c.name),
+  capInd: num('capInd') || 1, capCanal: num('capCanal') || 1, capHH: num('capHH') || 1,
+  capRep: num('capRep') || 1, repPct: num('repPct')});
+
+function drawHours() {
+  $('hourly').innerHTML = Array.from({length: H()}, (_, i) =>
+    `<tr><td>Hora ${i + 1}</td><td class="s"><input data-h="${i}" type="number" min="0" placeholder="${Math.round(num('total') / H())}" value="${hv[i] ?? ''}"></td></tr>`).join('');
+}
+
+// tabla de pivoteo: personas por rol en cada hora; clic en una fila = ver su layout
+function drawPlan() {
+  const cnt = (st, t) => st.filter(s => s.type === t).reduce((a, s) => a + s.n, 0);
+  const row = h => {
+    const st = alloc(h), w = Math.max(...st.map(s => s.util));
+    return `<tr data-view="${h}" class="${h === view ? 'sel' : ''}"><td>${h ? 'Hora ' + h : 'Plan inicial'}</td><td>${Math.round(vol(h))}</td>
+      <td>${cnt(st, 'Inductor')}</td><td>${cnt(st, 'Pescador')}</td><td>${cnt(st, 'Bipeador')}</td><td>${cnt(st, 'Repesca')}</td>
+      <td>${isFinite(w) ? Math.round(w * 100) + '%' : 'sin cubrir'}</td></tr>`;
+  };
+  const real = Array.from({length: H()}, (_, i) => vol(i + 1)).reduce((a, b) => a + b, 0);
+  $('plan').innerHTML = `<table class="card"><thead><tr><th>Vista</th><th>Paq/h</th><th>Inductor</th><th>Pescador</th><th>Bipeador</th><th>Repesca</th><th>Uso máx</th></tr></thead>
+    <tbody>${Array.from({length: H() + 1}, (_, h) => row(h)).join('')}</tbody></table>
+    <div style="color:var(--mut);margin-top:4px">Suma por hora: ${Math.round(real)} / total turno: ${Math.round(num('total'))}</div>`;
+}
+
 function render() {
   const staff = Math.floor(num('staff'));
   const names = $('names').value.split('\n').map(s => s.trim()).filter(Boolean);
   const nm = i => names[i] || 'C' + String(i + 1).padStart(2, '0');
   const valid = codes.filter(c => c.name);
-  const st = allocate({staff, volume: num('volume'), codes: valid,
-    capInd: num('capInd') || 1, capCanal: num('capCanal') || 1, capHH: num('capHH') || 1,
-    capRep: num('capRep') || 1, repPct: num('repPct')});
+  view = Math.min(view, H());
+  const st = alloc(view);
+  drawPlan();
   let k = 0;
   const html = {}, gaps = [];
   for (const s of st) {
@@ -136,7 +171,7 @@ function render() {
       ${html['c:' + c.name]}<div class="arrow">▼ tolva</div>${html['h:' + c.name]}</div>`).join('');
   $('layout').innerHTML = `
     <div class="row"><div class="wide">${html.ind}</div><div style="flex:1;align-self:center"><div class="belt"><span>cinta →</span></div></div></div>
-    <div class="lbl" style="text-align:left">Islas (toman el código de su posición → tolva) y handheld al final de cada brazo</div>
+    <div class="lbl" style="text-align:left">Pescadores (toman de la cinta el código de su posición → tolva) y Bipeadores (handheld + armado de HU) al final de cada brazo</div>
     <div class="cols">${cols}</div>
     <div class="belt"><span>fin de línea → repesca</span></div>
     <div class="wide">${html.rep}</div>`;
@@ -145,13 +180,18 @@ function render() {
 document.addEventListener('input', e => {
   const t = e.target;
   if (t.dataset.k) codes[t.dataset.i][t.dataset.k] = t.dataset.k === 'share' ? +t.value || 0 : t.value;
+  if (t.dataset.h) hv[+t.dataset.h] = t.value === '' ? undefined : +t.value;
+  if (t.id === 'hours') { hv.length = H(); drawHours(); }
+  if (t.id === 'total') drawHours();
   render();
 });
 document.addEventListener('click', e => {
+  const tr = e.target.closest('tr[data-view]');
+  if (tr) { view = +tr.dataset.view; render(); }
   if (e.target.dataset.del !== undefined) { codes.splice(+e.target.dataset.del, 1); drawCodes(); render(); }
   if (e.target.id === 'add') { codes.push({name: 'Código ' + (codes.length + 1), share: 5}); drawCodes(); render(); }
 });
-drawCodes(); render();
+drawCodes(); drawHours(); render();
 </script>
 </body>
 </html>
