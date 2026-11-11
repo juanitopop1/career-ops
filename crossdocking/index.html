@@ -24,17 +24,24 @@ details{margin-top:8px;color:var(--mut)}
 #sum{font-weight:600;margin-bottom:6px}
 .msg{padding:6px 10px;border-radius:6px;margin:4px 0;background:var(--card);border:1px solid var(--bad);color:var(--bad)}
 .lay{overflow-x:auto;padding-bottom:8px}
-.line{display:grid;grid-template-columns:1fr 60px 1fr;gap:8px;min-width:720px}
+.line{display:grid;grid-template-columns:1fr 56px 1fr;gap:10px;min-width:820px}
 .side{display:flex;flex-direction:column;gap:6px}
 .belt{background:var(--belt);border-radius:6px;color:#aaa;writing-mode:vertical-rl;text-align:center;letter-spacing:6px;font-size:12px;padding:8px 0}
 .sh{background:#ffe600;color:#000;font-weight:700;text-align:center;border-radius:6px;padding:6px}
 .sh small{display:block;font-weight:400;color:#333}
-.rowc{display:flex;gap:4px}.right .rowc{flex-direction:row-reverse}
-.isla,.cod,.rep{flex:1;background:var(--card);border:2px solid var(--ok);border-radius:6px;padding:4px;min-height:62px}
-.warn{border-color:var(--warn)}.bad{border-color:var(--bad)}
-.isla i,.cod b,.rep b{display:block;border-radius:3px;text-align:center;font-size:12px;font-style:normal;font-weight:700;color:#000}
-.isla i{background:#22c55e}.cod b{background:#ffe600}
-.rep{margin-top:auto}.rep b{background:#f6b98a}
+.blk{display:grid;grid-template-columns:1fr 64px 1fr;gap:4px;margin-bottom:10px;border-left:5px solid var(--ok);padding-left:4px}
+.right .blk{border-left:0;border-right:5px solid var(--ok);padding:0 4px 0 0}
+.blk.warn{border-color:var(--warn)}.blk.bad{border-color:var(--bad)}
+.col{display:flex;flex-direction:column;gap:2px}
+.cell{background:var(--card);border:1px solid var(--bd);border-radius:2px;padding:3px 8px;font-weight:600;min-height:26px;display:flex;justify-content:space-between;gap:6px}
+.cell em{font-style:normal;font-weight:400;font-size:11px;color:var(--mut)}
+.cell.i{border-left:4px solid #7c3aed}.cell.p{border-left:4px solid #16a34a}.cell.b{border-left:4px solid var(--ac)}.cell.r{border-left:4px solid #d9731f}
+.cell.none{color:var(--bad);border-color:var(--bad);font-weight:700}
+.isla{background:#22c55e;color:#000;font-weight:700;text-align:center;padding:4px 0;align-self:start;border:1px solid #000}
+.cod b,.sh,.rp{display:block;background:#ffe600;color:#000;font-weight:800;text-align:center;padding:4px;border:1px solid #000;border-radius:0}
+.rp{background:#f6b98a}
+.lb{font-weight:800;text-align:center}
+.cod small,.sh small{text-align:center}
 small{color:var(--mut);display:block}
 .chip{display:inline-block;color:#fff;border-radius:12px;padding:1px 8px;margin:2px 2px 0 0;font-size:12px}
 .chip.i{background:#7c3aed}.chip.p{background:#16a34a}.chip.b{background:var(--ac)}.chip.r{background:#d9731f}
@@ -169,19 +176,24 @@ function render() {
   const S = Object.fromEntries(st.map(s => [s.id, s]));
   const cls = s => s.n === 0 || s.util > 1 ? 'bad' : s.util > .85 ? 'warn' : '';
   const info = s => `<small>${Math.round(s.load)}/h · ${s.n ? Math.round(s.util * 100) + '%' : '<span class="gap">SIN CUBRIR</span>'}</small>`;
-  const chips = (s, c) => s.people.map(p => `<span class="chip ${c}">${p}</span>`).join('');
-  const side = (sd, cl) => {
+  const pct = s => s.n ? Math.round(s.util * 100) + '%' : '—';
+  const cells = (s, c, role) => s.n ? s.people.map(p => `<div class="cell ${c}">${p}<em>${role}</em></div>`).join('') : `<div class="cell none">SIN CUBRIR</div>`;
+  const side = (sd, right) => {
     const ind = S['ind:' + sd], rep = S['rep:' + sd];
-    if (!ind) return `<div class="side ${cl}"></div>`;
+    if (!ind) return '<div></div>';
+    const blk = (cl, outer, mid, inner) => `<div class="blk ${cl}">${right ? inner + mid + outer : outer + mid + inner}</div>`;
+    const top = blk(cls(ind), `<div class="col">${cells(ind, 'i', 'Inductor')}</div>`, '<div></div>',
+      `<div class="col cod"><div class="sh">INDUCCIÓN ${sd}</div><div class="lb">INDUCTOR</div>${info(ind)}</div>`);
     const rows = hcodes(view).filter(c => c.side === sd).sort((a, b) => b.share - a.share).map((c, i) => {
       const p = S['c:' + c.name], b = S['h:' + c.name];
-      return `<div class="rowc"><div class="isla ${cls(p)}"><i>ISLA ${i + 1}</i>${info(p)}${chips(p, 'p')}</div>
-        <div class="cod ${cls(b)}"><b>${c.name} · ${c.share}%</b>${info(b)}${chips(b, 'b')}</div></div>`;
+      return blk(cls(p.util > b.util ? p : b), `<div class="col">${cells(p, 'p', 'Pescador')}</div>`, `<div class="isla">ISLA ${i + 1}</div>`,
+        `<div class="col cod"><b>${c.name} · ${c.share}%</b><small>Pescador ${pct(p)} · Bipeador ${pct(b)}</small>${cells(b, 'b', 'Bipeador')}</div>`);
     }).join('');
-    return `<div class="side ${cl}"><div class="sh">INDUCCIÓN ${sd}<small>${Math.round(ind.load)} paq/h</small>${chips(ind, 'i')}</div>${rows}
-      <div class="rep ${cls(rep)}"><b>REPESCA</b>${info(rep)}${chips(rep, 'r')}</div></div>`;
+    const bottom = blk(cls(rep), `<div class="col">${cells(rep, 'r', 'Repesca')}</div>`, '<div></div>',
+      `<div class="col cod"><div class="rp">REPESCA</div>${info(rep)}</div>`);
+    return `<div class="side ${right ? 'right' : ''}">${top}${rows}${bottom}</div>`;
   };
-  $('layout').innerHTML = `<div class="line">${side('FBM', 'left')}<div class="belt">CINTA TRANSPORTADORA</div>${side('COLECTA', 'right')}</div>
+  $('layout').innerHTML = `<div class="line">${side('FBM', false)}<div class="belt">CINTA TRANSPORTADORA</div>${side('COLECTA', true)}</div>
     <div style="color:var(--mut);margin-top:6px"><span class="chip i">Inductor</span><span class="chip p">Pescador</span><span class="chip b">Bipeador</span><span class="chip r">Repesca</span></div>`;
 
   const worst = Math.max(...st.map(s => s.util));
