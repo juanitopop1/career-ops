@@ -23,6 +23,8 @@ Asignar colaboradores a posiciones de una línea de crossdocking, al inicio del 
 - El % de demanda por código varía por hora. Hay un % base y se puede sobrescribir por hora.
 - Si un código se satura, hay que mover gente a reforzarlo. La app muestra los movimientos respecto a la hora anterior.
 - El espejo se activa solo cuando el volumen por hora de un código pasa un umbral. Ese umbral aún no está medido y es editable. Hoy es 600 paq/h, un número de ejemplo.
+- Los códigos y el layout cambian con el tiempo: en la tabla se pueden agregar, quitar, reordenar (↑↓) y cambiar de lado FBM/COLECTA. El orden de la tabla es el orden físico del layout.
+- Los colaboradores se pueden mover a mano arrastrando su celda a otra posición. El movimiento vale solo para esa hora y se puede deshacer.
 - Fuera de alcance por ahora: los modelos de dotación que ya tienen.
 
 ## Algoritmo (greedy)

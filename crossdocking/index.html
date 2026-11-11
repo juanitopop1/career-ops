@@ -46,6 +46,7 @@ small{color:var(--mut);display:block}
 .chip{display:inline-block;color:#fff;border-radius:12px;padding:1px 8px;margin:2px 2px 0 0;font-size:12px}
 .chip.i{background:#7c3aed}.chip.p{background:#16a34a}.chip.b{background:var(--ac)}.chip.r{background:#d9731f}
 .gap{color:var(--bad);font-weight:700}
+.cell{cursor:grab}.cell.mv{outline:2px dashed var(--warn)}.drop{min-height:26px}
 </style>
 </head>
 <body>
@@ -125,11 +126,12 @@ function allocate({staff, volume, codes, capInd, capCanal, capHH, capRep, repPct
 const $ = id => document.getElementById(id);
 const num = id => Math.max(0, +$(id).value || 0);
 let codes = [['ERMX', 22], ['SRM1', 18], ['SRM2', 14], ['RMX1', 12], ['SXI1', 10], ['SPM1/SLT1', 8], ['EPM2', 7], ['HIBRIDO', 5], ['SRC1', 4]]
-  .map(([name, share], i) => ({name, share, side: i % 2 ? 'COLECTA' : 'FBM'}));
+  .map(([name, share], i) => ({id: i + 1, name, share, side: i % 2 ? 'COLECTA' : 'FBM'}));
+let nextId = 100, manual = {}; // manual[h][persona] = id de la posición a la que se movió a mano
 let view = 0, hv = [], sh = {}; // view 0 = plan inicial; hv[h-1] = volumen de la hora h; sh[h][i] = % del código i en la hora h
 const H = () => Math.min(24, Math.max(1, Math.floor(num('hours'))));
 const vol = h => (h === 0 || hv[h - 1] === undefined) ? num('total') / H() : hv[h - 1];
-const hcodes = h => codes.map((c, i) => ({name: c.name, side: c.side, share: h ? sh[h]?.[i] ?? c.share : c.share})).filter(c => c.name);
+const hcodes = h => codes.map(c => ({name: c.name, side: c.side, share: h ? sh[h]?.[c.id] ?? c.share : c.share})).filter(c => c.name);
 const alloc = h => allocate({staff: Math.floor(num('staff')), volume: vol(h), codes: hcodes(h),
   capInd: num('capInd') || 1, capCanal: num('capCanal') || 1, capHH: num('capHH') || 1,
   capRep: num('capRep') || 1, repPct: num('repPct'), espejoAt: num('espejoAt') || Infinity});
@@ -138,9 +140,9 @@ function drawCodes() {
   $('codesTitle').textContent = 'Demanda % por código · ' + (view ? 'Hora ' + view + ' (vacío = base)' : 'plan inicial (base)');
   $('codes').innerHTML = codes.map((c, i) =>
     `<tr><td><input data-i="${i}" data-k="name" value="${c.name}"></td>
-     <td class="s"><input data-i="${i}" data-k="share" type="number" min="0" placeholder="${c.share}" value="${view === 0 ? c.share : sh[view]?.[i] ?? ''}"></td>
+     <td class="s"><input data-i="${i}" data-k="share" type="number" min="0" placeholder="${c.share}" value="${view === 0 ? c.share : sh[view]?.[c.id] ?? ''}"></td>
      <td><select data-i="${i}" data-k="side"><option${c.side === 'FBM' ? ' selected' : ''}>FBM</option><option${c.side === 'COLECTA' ? ' selected' : ''}>COLECTA</option></select></td>
-     <td><button class="x" data-del="${i}">×</button></td></tr>`).join('');
+     <td style="white-space:nowrap"><button data-up="${i}">↑</button> <button data-dn="${i}">↓</button> <button class="x" data-del="${i}">×</button></td></tr>`).join('');
 }
 
 function drawHours() {
@@ -152,7 +154,7 @@ function drawHours() {
 function drawPlan() {
   const cnt = (st, t) => st.filter(s => s.type === t).reduce((a, s) => a + s.n, 0);
   const row = h => {
-    const st = alloc(h), w = Math.max(...st.map(s => s.util));
+    const st = build(h), w = Math.max(...st.map(s => s.util));
     return `<tr data-view="${h}" class="${h === view ? 'sel' : ''}"><td>${h ? 'Hora ' + h : 'Plan inicial'}</td><td>${Math.round(vol(h))}</td>
       <td>${cnt(st, 'Inductor')}</td><td>${cnt(st, 'Pescador')}</td><td>${cnt(st, 'Bipeador')}</td><td>${cnt(st, 'Repesca')}</td>
       <td>${isFinite(w) ? Math.round(w * 100) + '%' : 'sin cubrir'}</td></tr>`;
@@ -163,57 +165,69 @@ function drawPlan() {
     <div style="color:var(--mut);margin-top:4px">Suma por hora: ${Math.round(real)} / total turno: ${Math.round(num('total'))}</div>`;
 }
 
-function render() {
-  const staff = Math.floor(num('staff'));
+function build(h) {
   const names = $('names').value.split('\n').map(s => s.trim()).filter(Boolean);
   const nm = i => names[i] || 'C' + String(i + 1).padStart(2, '0');
-  view = Math.min(view, H());
-  const st = alloc(view);
-  drawPlan();
+  const st = alloc(h);
   let k = 0;
-  const gaps = [];
-  for (const s of st) {
-    s.people = Array.from({length: s.n}, () => nm(k++));
-    if (s.n === 0) gaps.push(`${s.type} ${s.code ? s.code + (s.arm === 'ESPEJO' ? ' espejo' : '') : s.side}`);
+  for (const s of st) s.people = Array.from({length: s.n}, () => nm(k++));
+  const S = Object.fromEntries(st.map(s => [s.id, s]));
+  for (const [p, sid] of Object.entries(manual[h] || {})) {
+    const from = st.find(s => s.people.includes(p)), to = S[sid];
+    if (from && to && from !== to) { from.people.splice(from.people.indexOf(p), 1); to.people.push(p); }
   }
+  for (const s of st) { s.n = s.people.length; s.util = s.n ? s.load / (s.n * s.cap) : Infinity; }
+  return st;
+}
+
+function render() {
+  const staff = Math.floor(num('staff'));
+  view = Math.min(view, H());
+  const st = build(view);
+  drawPlan();
+  const k = st.reduce((a, s) => a + s.n, 0);
+  const label = s => s.code ? s.code + (s.arm === 'ESPEJO' ? ' espejo' : '') : s.side;
+  const gaps = st.filter(s => s.n === 0).map(s => `${s.type} ${label(s)}`);
   const S = Object.fromEntries(st.map(s => [s.id, s]));
   const cls = s => s.n === 0 || s.util > 1 ? 'bad' : s.util > .85 ? 'warn' : '';
   const info = s => `<small>${Math.round(s.load)}/h · ${s.n ? Math.round(s.util * 100) + '%' : '<span class="gap">SIN CUBRIR</span>'}</small>`;
   const pct = s => s.n ? Math.round(s.util * 100) + '%' : '—';
-  const cells = (s, c, role) => s.n ? s.people.map(p => `<div class="cell ${c}">${p}<em>${role}</em></div>`).join('') : `<div class="cell none">SIN CUBRIR</div>`;
+  const mm = manual[view] || {};
+  const col = (s, c, role) => `<div class="col drop" data-sid="${s.id}">${s.n ? s.people.map(p =>
+    `<div class="cell ${c}${mm[p] ? ' mv' : ''}" draggable="true" data-p="${p}">${p}<em>${role}</em></div>`).join('') : '<div class="cell none">SIN CUBRIR</div>'}</div>`;
   const side = (sd, right) => {
     const ind = S['ind:' + sd], rep = S['rep:' + sd];
     if (!ind) return '<div></div>';
     const blk = (cl, outer, mid, inner) => `<div class="blk ${cl}">${right ? inner + mid + outer : outer + mid + inner}</div>`;
-    const top = blk(cls(ind), `<div class="col">${cells(ind, 'i', 'Inductor')}</div>`, '<div></div>',
+    const top = blk(cls(ind), col(ind, 'i', 'Inductor'), '<div></div>',
       `<div class="col cod"><div class="sh">INDUCCIÓN ${sd}</div><div class="lb">INDUCTOR</div>${info(ind)}</div>`);
     let n = 0;
-    const rows = hcodes(view).filter(c => c.side === sd).sort((a, b) => b.share - a.share).map(c =>
+    const rows = hcodes(view).filter(c => c.side === sd).map(c =>
       st.filter(x => x.type === 'Pescador' && x.code === c.name).map(p => {
         const b = S[`h:${c.name}:${p.arm}`];
-        return blk(cls(p.util > b.util ? p : b), `<div class="col">${cells(b, 'b', 'Bipeador')}</div>`, `<div class="isla">ISLA ${++n}</div>`,
-          `<div class="col cod"><div class="lb"><i>${p.arm}</i></div><b>${c.name} · ${c.share}%</b><small>Pescador ${pct(p)} · Bipeador ${pct(b)}</small>${cells(p, 'p', 'Pescador')}</div>`);
+        return blk(cls(p.util > b.util ? p : b), col(b, 'b', 'Bipeador'), `<div class="isla">ISLA ${++n}</div>`,
+          `<div class="col cod"><div class="lb"><i>${p.arm}</i></div><b>${c.name} · ${c.share}%</b><small>Pescador ${pct(p)} · Bipeador ${pct(b)}</small>${col(p, 'p', 'Pescador')}</div>`);
       }).join('')).join('');
-    const bottom = blk(cls(rep), `<div class="col">${cells(rep, 'r', 'Repesca')}</div>`, '<div></div>',
+    const bottom = blk(cls(rep), col(rep, 'r', 'Repesca'), '<div></div>',
       `<div class="col cod"><div class="rp">REPESCA</div>${info(rep)}</div>`);
     return `<div class="side ${right ? 'right' : ''}">${top}${rows}${bottom}</div>`;
   };
   $('layout').innerHTML = `<div class="line">${side('FBM', false)}<div class="belt">CINTA TRANSPORTADORA</div>${side('COLECTA', true)}</div>
-    <div style="color:var(--mut);margin-top:6px"><span class="chip i">Inductor</span><span class="chip p">Pescador</span><span class="chip b">Bipeador</span><span class="chip r">Repesca</span></div>`;
+    <div style="color:var(--mut);margin-top:6px"><span class="chip i">Inductor</span><span class="chip p">Pescador</span><span class="chip b">Bipeador</span><span class="chip r">Repesca</span> · Arrastra un colaborador a otra posición ${Object.keys(mm).length ? '<button id="reset">Deshacer movimientos manuales de esta hora</button>' : ''}</div>`;
 
   const worst = Math.max(...st.map(s => s.util));
   $('sum').textContent = `${view ? 'Hora ' + view : 'Plan inicial'} · Asignados: ${k}/${staff} · Cuello de botella: ${isFinite(worst) ? Math.round(worst * 100) + '%' : 'posiciones sin cubrir'}`;
   $('msgs').innerHTML = (gaps.length ? `<div class="msg">Faltan colaboradores. Sin cubrir: ${gaps.join(', ')}</div>` : '') +
     (worst > 1 && !gaps.length ? `<div class="msg">Sobrecarga: con este personal no se alcanza el volumen (uso &gt; 100%).</div>` : '');
-  const prev = view ? alloc(view - 1) : [];
+  const prev = view ? build(view - 1) : [];
   const moves = st.map(s => [s, s.n - (prev.find(p => p.id === s.id)?.n ?? 0)]).filter(([, d]) => d)
-    .map(([s, d]) => `${d > 0 ? '+' : ''}${d} ${s.type} ${s.code ? s.code + (s.arm === 'ESPEJO' ? ' espejo' : '') : s.side}`);
+    .map(([s, d]) => `${d > 0 ? '+' : ''}${d} ${s.type} ${label(s)}`);
   $('moves').innerHTML = view ? `<b>Movimientos vs ${view > 1 ? 'hora ' + (view - 1) : 'plan inicial'}:</b> ${moves.join(' · ') || 'sin cambios'}` : '';
 }
 
 document.addEventListener('input', e => {
   const t = e.target;
-  if (t.dataset.k === 'share' && view) (sh[view] ??= {})[t.dataset.i] = t.value === '' ? undefined : +t.value;
+  if (t.dataset.k === 'share' && view) (sh[view] ??= {})[codes[t.dataset.i].id] = t.value === '' ? undefined : +t.value;
   else if (t.dataset.k) codes[t.dataset.i][t.dataset.k] = t.dataset.k === 'share' ? +t.value || 0 : t.value;
   if (t.dataset.h) hv[+t.dataset.h] = t.value === '' ? undefined : +t.value;
   if (t.id === 'hours') { hv.length = H(); drawHours(); }
@@ -223,12 +237,19 @@ document.addEventListener('input', e => {
 document.addEventListener('click', e => {
   const tr = e.target.closest('tr[data-view]');
   if (tr) { view = +tr.dataset.view; drawCodes(); render(); }
-  if (e.target.dataset.del !== undefined) {
-    const d = +e.target.dataset.del; codes.splice(d, 1);
-    for (const h in sh) sh[h] = Object.fromEntries(Object.entries(sh[h]).filter(([i]) => +i !== d).map(([i, v]) => [+i > d ? i - 1 : i, v]));
-    drawCodes(); render();
-  }
-  if (e.target.id === 'add') { codes.push({name: 'Código ' + (codes.length + 1), share: 5, side: 'FBM'}); drawCodes(); render(); }
+  if (e.target.dataset.del !== undefined) { codes.splice(+e.target.dataset.del, 1); drawCodes(); render(); }
+  const mv = (i, d) => { const j = i + d; if (j >= 0 && j < codes.length) [codes[i], codes[j]] = [codes[j], codes[i]]; drawCodes(); render(); };
+  if (e.target.dataset.up !== undefined) mv(+e.target.dataset.up, -1);
+  if (e.target.dataset.dn !== undefined) mv(+e.target.dataset.dn, 1);
+  if (e.target.id === 'reset') { delete manual[view]; render(); }
+  if (e.target.id === 'add') { codes.push({id: nextId++, name: 'Código ' + (codes.length + 1), share: 5, side: 'FBM'}); drawCodes(); render(); }
+});
+// arrastrar un colaborador a otra posición (queda fijo a mano para esa hora)
+document.addEventListener('dragstart', e => { if (e.target.dataset?.p) e.dataTransfer.setData('text/plain', e.target.dataset.p); });
+document.addEventListener('dragover', e => { if (e.target.closest?.('.drop')) e.preventDefault(); });
+document.addEventListener('drop', e => {
+  const d = e.target.closest?.('.drop'), p = e.dataTransfer.getData('text/plain');
+  if (d && p) { e.preventDefault(); (manual[view] ??= {})[p] = d.dataset.sid; render(); }
 });
 drawCodes(); drawHours(); render();
 </script>
