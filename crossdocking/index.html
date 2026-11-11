@@ -65,6 +65,7 @@ small{color:var(--mut);display:block}
       <label>Bipeador <input id="capHH" type="number" min="1" value="450"></label>
       <label>Repesca <input id="capRep" type="number" min="1" value="400"></label>
       <label>% que cae a repesca <input id="repPct" type="number" min="0" max="100" value="3"></label>
+      <label>Espejo desde (paq/h por código, 0 = nunca) <input id="espejoAt" type="number" min="0" value="600"></label>
     </details>
   </div>
   <div class="card">
@@ -87,7 +88,7 @@ small{color:var(--mut);display:block}
 <script>
 // ponytail: asignación greedy (cubre mínimo por prioridad, luego cada extra va a la estación más saturada).
 // Techo: ignora distancia/ergonomía y topes físicos por posición; añadir tope por estación si hace falta.
-function allocate({staff, volume, codes, capInd, capCanal, capHH, capRep, repPct}) {
+function allocate({staff, volume, codes, capInd, capCanal, capHH, capRep, repPct, espejoAt}) {
   const tot = codes.reduce((a, c) => a + c.share, 0) || 1;
   const sides = ['FBM', 'COLECTA'].filter(s => codes.some(c => c.side === s));
   const sideLoad = s => codes.filter(c => c.side === s).reduce((a, c) => a + c.share, 0) / tot * volume;
@@ -96,8 +97,10 @@ function allocate({staff, volume, codes, capInd, capCanal, capHH, capRep, repPct
   sides.forEach(s => st.push({id: 'rep:' + s, type: 'Repesca', side: s, load: sideLoad(s) * repPct / 100, cap: capRep, n: 0}));
   [...codes].sort((a, b) => b.share - a.share).forEach(c => {
     const load = volume * c.share / tot;
-    st.push({id: 'c:' + c.name, type: 'Pescador', side: c.side, code: c.name, load, cap: capCanal, n: 0},
-            {id: 'h:' + c.name, type: 'Bipeador', side: c.side, code: c.name, load, cap: capHH, n: 0});
+    const arms = load > espejoAt ? ['PRINCIPAL', 'ESPEJO'] : ['PRINCIPAL'];   // espejo = refuerzo del mismo código por volumen
+    arms.forEach(arm => st.push(
+      {id: `c:${c.name}:${arm}`, type: 'Pescador', side: c.side, code: c.name, arm, load: load / arms.length, cap: capCanal, n: 0},
+      {id: `h:${c.name}:${arm}`, type: 'Bipeador', side: c.side, code: c.name, arm, load: load / arms.length, cap: capHH, n: 0}));
   });
   let left = staff;
   for (const s of st) if (left > 0) { s.n = 1; left--; }          // cobertura mínima por prioridad
@@ -114,7 +117,7 @@ function allocate({staff, volume, codes, capInd, capCanal, capHH, capRep, repPct
 (function () {
   const base = {volume: 1000, codes: [{name: 'A', share: 70, side: 'FBM'}, {name: 'B', share: 30, side: 'COLECTA'}], capInd: 1000, capCanal: 500, capHH: 500, capRep: 500, repPct: 5};
   const a = allocate({...base, staff: 3});
-  console.assert(a.reduce((s, x) => s + x.n, 0) === 3 && a.find(x => x.id === 'ind:COLECTA').n === 1 && a.find(x => x.id === 'c:A').n === 0, 'min coverage');
+  console.assert(a.reduce((s, x) => s + x.n, 0) === 3 && a.find(x => x.id === 'ind:COLECTA').n === 1 && a.find(x => x.id === 'c:A:PRINCIPAL').n === 0, 'min coverage');
   const b = allocate({...base, staff: 12});
   console.assert(b.reduce((s, x) => s + x.n, 0) === 12 && b.every(x => x.n >= 1), 'total/coverage');
 })();
@@ -129,7 +132,7 @@ const vol = h => (h === 0 || hv[h - 1] === undefined) ? num('total') / H() : hv[
 const hcodes = h => codes.map((c, i) => ({name: c.name, side: c.side, share: h ? sh[h]?.[i] ?? c.share : c.share})).filter(c => c.name);
 const alloc = h => allocate({staff: Math.floor(num('staff')), volume: vol(h), codes: hcodes(h),
   capInd: num('capInd') || 1, capCanal: num('capCanal') || 1, capHH: num('capHH') || 1,
-  capRep: num('capRep') || 1, repPct: num('repPct')});
+  capRep: num('capRep') || 1, repPct: num('repPct'), espejoAt: num('espejoAt') || Infinity});
 
 function drawCodes() {
   $('codesTitle').textContent = 'Demanda % por código · ' + (view ? 'Hora ' + view + ' (vacío = base)' : 'plan inicial (base)');
@@ -171,7 +174,7 @@ function render() {
   const gaps = [];
   for (const s of st) {
     s.people = Array.from({length: s.n}, () => nm(k++));
-    if (s.n === 0) gaps.push(`${s.type} ${s.code || s.side}`);
+    if (s.n === 0) gaps.push(`${s.type} ${s.code ? s.code + (s.arm === 'ESPEJO' ? ' espejo' : '') : s.side}`);
   }
   const S = Object.fromEntries(st.map(s => [s.id, s]));
   const cls = s => s.n === 0 || s.util > 1 ? 'bad' : s.util > .85 ? 'warn' : '';
@@ -184,11 +187,13 @@ function render() {
     const blk = (cl, outer, mid, inner) => `<div class="blk ${cl}">${right ? inner + mid + outer : outer + mid + inner}</div>`;
     const top = blk(cls(ind), `<div class="col">${cells(ind, 'i', 'Inductor')}</div>`, '<div></div>',
       `<div class="col cod"><div class="sh">INDUCCIÓN ${sd}</div><div class="lb">INDUCTOR</div>${info(ind)}</div>`);
-    const rows = hcodes(view).filter(c => c.side === sd).sort((a, b) => b.share - a.share).map((c, i) => {
-      const p = S['c:' + c.name], b = S['h:' + c.name];
-      return blk(cls(p.util > b.util ? p : b), `<div class="col">${cells(b, 'b', 'Bipeador')}</div>`, `<div class="isla">ISLA ${i + 1}</div>`,
-        `<div class="col cod"><b>${c.name} · ${c.share}%</b><small>Pescador ${pct(p)} · Bipeador ${pct(b)}</small>${cells(p, 'p', 'Pescador')}</div>`);
-    }).join('');
+    let n = 0;
+    const rows = hcodes(view).filter(c => c.side === sd).sort((a, b) => b.share - a.share).map(c =>
+      st.filter(x => x.type === 'Pescador' && x.code === c.name).map(p => {
+        const b = S[`h:${c.name}:${p.arm}`];
+        return blk(cls(p.util > b.util ? p : b), `<div class="col">${cells(b, 'b', 'Bipeador')}</div>`, `<div class="isla">ISLA ${++n}</div>`,
+          `<div class="col cod"><div class="lb"><i>${p.arm}</i></div><b>${c.name} · ${c.share}%</b><small>Pescador ${pct(p)} · Bipeador ${pct(b)}</small>${cells(p, 'p', 'Pescador')}</div>`);
+      }).join('')).join('');
     const bottom = blk(cls(rep), `<div class="col">${cells(rep, 'r', 'Repesca')}</div>`, '<div></div>',
       `<div class="col cod"><div class="rp">REPESCA</div>${info(rep)}</div>`);
     return `<div class="side ${right ? 'right' : ''}">${top}${rows}${bottom}</div>`;
@@ -202,7 +207,7 @@ function render() {
     (worst > 1 && !gaps.length ? `<div class="msg">Sobrecarga: con este personal no se alcanza el volumen (uso &gt; 100%).</div>` : '');
   const prev = view ? alloc(view - 1) : [];
   const moves = st.map(s => [s, s.n - (prev.find(p => p.id === s.id)?.n ?? 0)]).filter(([, d]) => d)
-    .map(([s, d]) => `${d > 0 ? '+' : ''}${d} ${s.type} ${s.code || s.side}`);
+    .map(([s, d]) => `${d > 0 ? '+' : ''}${d} ${s.type} ${s.code ? s.code + (s.arm === 'ESPEJO' ? ' espejo' : '') : s.side}`);
   $('moves').innerHTML = view ? `<b>Movimientos vs ${view > 1 ? 'hora ' + (view - 1) : 'plan inicial'}:</b> ${moves.join(' · ') || 'sin cambios'}` : '';
 }
 
