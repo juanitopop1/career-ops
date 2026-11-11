@@ -186,8 +186,8 @@ function render() {
       `<div class="col cod"><div class="sh">INDUCCIÓN ${sd}</div><div class="lb">INDUCTOR</div>${info(ind)}</div>`);
     const rows = hcodes(view).filter(c => c.side === sd).sort((a, b) => b.share - a.share).map((c, i) => {
       const p = S['c:' + c.name], b = S['h:' + c.name];
-      return blk(cls(p.util > b.util ? p : b), `<div class="col">${cells(p, 'p', 'Pescador')}</div>`, `<div class="isla">ISLA ${i + 1}</div>`,
-        `<div class="col cod"><b>${c.name} · ${c.share}%</b><small>Pescador ${pct(p)} · Bipeador ${pct(b)}</small>${cells(b, 'b', 'Bipeador')}</div>`);
+      return blk(cls(p.util > b.util ? p : b), `<div class="col">${cells(b, 'b', 'Bipeador')}</div>`, `<div class="isla">ISLA ${i + 1}</div>`,
+        `<div class="col cod"><b>${c.name} · ${c.share}%</b><small>Pescador ${pct(p)} · Bipeador ${pct(b)}</small>${cells(p, 'p', 'Pescador')}</div>`);
     }).join('');
     const bottom = blk(cls(rep), `<div class="col">${cells(rep, 'r', 'Repesca')}</div>`, '<div></div>',
       `<div class="col cod"><div class="rp">REPESCA</div>${info(rep)}</div>`);
